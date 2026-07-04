@@ -284,6 +284,19 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 }
 .capacity-vs { font-weight: 700; }
 
+.table-shared-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .navbar-container { padding: 0 16px; }

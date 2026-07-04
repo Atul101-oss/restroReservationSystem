@@ -36,8 +36,8 @@ export const getMe = () => API.get('/auth/me');
 
 // ── Tables ──
 export const getTables = () => API.get('/tables');
-export const getAvailableTables = (date, timeSlot, guests) =>
-  API.get('/tables/available', { params: { date, timeSlot, guests } });
+export const getAvailableTables = (date, timeSlot, guests, isShared) =>
+  API.get('/tables/available', { params: { date, timeSlot, guests, isShared } });
 export const createTable = (data) => API.post('/tables', data);
 export const updateTable = (id, data) => API.put(`/tables/${id}`, data);
 export const deleteTable = (id) => API.delete(`/tables/${id}`);

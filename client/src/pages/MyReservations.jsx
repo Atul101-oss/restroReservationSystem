@@ -127,6 +127,7 @@ const MyReservations = () => {
                   <div className="reservation-table-info">
                     <span className="table-badge">Table{r.tables && r.tables.length > 1 ? 's' : ''} {tableNumbers}</span>
                     {tableLocations && <span className="location-badge">{tableLocations}</span>}
+                    {r.isShared && <span className="table-shared-badge" style={{ verticalAlign: 'middle', marginLeft: '6px', marginTop: 0 }}>Shared</span>}
                   </div>
                   <span className="status-badge" style={{ backgroundColor: style.bg, color: style.color }}>
                     {style.label}

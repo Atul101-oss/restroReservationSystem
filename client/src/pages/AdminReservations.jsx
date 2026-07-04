@@ -92,7 +92,9 @@ const AdminReservations = () => {
                   <tr key={r._id}>
                     <td><strong>{r.user?.name||'N/A'}</strong><br/><small>{r.user?.email||''}</small></td>
                     <td>
-                      Table{r.tables && r.tables.length > 1 ? 's' : ''} {r.tables && r.tables.length > 0 ? r.tables.map(t => t.tableNumber).join(', ') : '?'}<br/>
+                      Table{r.tables && r.tables.length > 1 ? 's' : ''} {r.tables && r.tables.length > 0 ? r.tables.map(t => t.tableNumber).join(', ') : '?'}
+                      {r.isShared && <span className="table-shared-badge" style={{ verticalAlign: 'middle', marginLeft: '6px', marginTop: 0 }}>Shared</span>}
+                      <br/>
                       <small>
                         {r.tables && r.tables.length > 0 ? [...new Set(r.tables.map(t => LOCATION_LABELS[t.location] || t.location))].join(', ') : ''} · {r.tables && r.tables.length > 0 ? r.tables.reduce((sum, t) => sum + t.capacity, 0) : 0} seats
                       </small>

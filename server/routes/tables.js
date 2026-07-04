@@ -27,7 +27,7 @@ router.get('/', protect, async (req, res, next) => {
  */
 router.get('/available', protect, async (req, res, next) => {
   try {
-    const { date, timeSlot, guests } = req.query;
+    const { date, timeSlot, guests, isShared } = req.query;
 
     if (!date || !timeSlot || !guests) {
       return res.status(400).json({
@@ -48,26 +48,36 @@ router.get('/available', protect, async (req, res, next) => {
     const reservationDate = new Date(date);
     reservationDate.setHours(0, 0, 0, 0);
 
-    // Get ALL available tables (no capacity filter)
+    const isSharedBooking = isShared === 'true';
+
+    // Get available tables (including shared ones if isSharedBooking is true)
     const availableTables = await Reservation.findAvailableTables(
       reservationDate,
       timeSlot,
-      guestCount
+      guestCount,
+      isSharedBooking
     );
 
-    // Check if any single table fits
-    const singleFitTables = availableTables.filter((t) => t.capacity >= guestCount);
+    const getRemainingCapacity = (t) => {
+      if (t.currentOccupancy !== undefined) {
+        return t.capacity - t.currentOccupancy;
+      }
+      return t.capacity;
+    };
+
+    // Check if any single table fits (using remaining capacity for shared tables)
+    const singleFitTables = availableTables.filter((t) => getRemainingCapacity(t) >= guestCount);
     const needsMultiTable = singleFitTables.length === 0 && availableTables.length > 0;
 
-    // Build a suggested multi-table combination (greedy: largest first)
+    // Build a suggested multi-table combination (greedy: largest remaining first)
     let suggestedTables = [];
     if (needsMultiTable) {
       let remaining = guestCount;
-      const sorted = [...availableTables].sort((a, b) => b.capacity - a.capacity);
+      const sorted = [...availableTables].sort((a, b) => getRemainingCapacity(b) - getRemainingCapacity(a));
       for (const t of sorted) {
         if (remaining <= 0) break;
         suggestedTables.push(t);
-        remaining -= t.capacity;
+        remaining -= getRemainingCapacity(t);
       }
       // If even all tables aren't enough, clear suggestion
       if (remaining > 0) {
@@ -80,8 +90,8 @@ router.get('/available', protect, async (req, res, next) => {
       count: availableTables.length,
       data: availableTables,
       needsMultiTable,
-      suggestedTableIds: suggestedTables.map((t) => t._id),
-      suggestedCapacity: suggestedTables.reduce((sum, t) => sum + t.capacity, 0),
+      suggestedTableIds: suggestedTables.map((t) => t._id || t.id),
+      suggestedCapacity: suggestedTables.reduce((sum, t) => sum + getRemainingCapacity(t), 0),
     });
   } catch (error) {
     next(error);

@@ -22,6 +22,7 @@ const CreateReservation = () => {
     date: getTodayDate(),
     timeSlot: '',
     guests: 2,
+    isShared: false,
     specialRequests: '',
   });
   const [availableTables, setAvailableTables] = useState([]);
@@ -34,7 +35,7 @@ const CreateReservation = () => {
 
   const guestCount = parseInt(formData.guests, 10) || 0;
 
-  // Fetch available tables whenever date, timeSlot, or guests change
+  // Fetch available tables whenever date, timeSlot, guests, or isShared change
   useEffect(() => {
     if (formData.date && formData.timeSlot && formData.guests) {
       fetchAvailableTables();
@@ -44,7 +45,7 @@ const CreateReservation = () => {
       setSuggestedTableIds([]);
     }
     setSelectedTableIds([]);
-  }, [formData.date, formData.timeSlot, formData.guests]);
+  }, [formData.date, formData.timeSlot, formData.guests, formData.isShared]);
 
   const fetchAvailableTables = async () => {
     setLoadingTables(true);
@@ -52,7 +53,8 @@ const CreateReservation = () => {
       const res = await getAvailableTables(
         formData.date,
         formData.timeSlot,
-        formData.guests
+        formData.guests,
+        formData.isShared
       );
       setAvailableTables(res.data.data);
       setNeedsMultiTable(res.data.needsMultiTable);
@@ -68,10 +70,10 @@ const CreateReservation = () => {
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: type === 'checkbox' ? checked : value,
     }));
   };
 
@@ -97,10 +99,17 @@ const CreateReservation = () => {
     setSelectedTableIds([...suggestedTableIds]);
   };
 
+  const getRemainingCapacity = (table) => {
+    if (table.currentOccupancy !== undefined) {
+      return table.capacity - table.currentOccupancy;
+    }
+    return table.capacity;
+  };
+
   // Calculate combined capacity of selected tables
   const selectedCapacity = selectedTableIds.reduce((sum, id) => {
     const table = availableTables.find((t) => t._id === id);
-    return sum + (table?.capacity || 0);
+    return sum + (table ? getRemainingCapacity(table) : 0);
   }, 0);
 
   const handleSubmit = async (e) => {
@@ -112,6 +121,7 @@ const CreateReservation = () => {
         date: formData.date,
         timeSlot: formData.timeSlot,
         guests: guestCount,
+        isShared: formData.isShared,
         specialRequests: formData.specialRequests,
       };
 
@@ -203,6 +213,20 @@ const CreateReservation = () => {
               required
             />
           </div>
+
+          <div className="form-group checkbox-group" style={{ gridColumn: 'span 3', flexDirection: 'row', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+            <input
+              type="checkbox"
+              id="res-shared"
+              name="isShared"
+              checked={formData.isShared}
+              onChange={handleChange}
+              style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+            />
+            <label htmlFor="res-shared" style={{ marginBottom: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.95rem', fontWeight: 600 }}>
+              Allow table sharing with other guests (Shared Table)
+            </label>
+          </div>
         </div>
 
         {/* Available Tables Section */}
@@ -224,7 +248,7 @@ const CreateReservation = () => {
                     No single table can seat {guestCount} guest{guestCount !== 1 ? 's' : ''}
                   </p>
                   <p className="multi-table-alert-sub">
-                    The largest available table seats {Math.max(...availableTables.map((t) => t.capacity))} guests.
+                    The largest available table has {Math.max(...availableTables.map((t) => getRemainingCapacity(t)))} remaining seats.
                     Select multiple tables below to accommodate your party.
                   </p>
                   {suggestedTableIds.length > 0 && (
@@ -252,7 +276,8 @@ const CreateReservation = () => {
                 <div className="table-grid">
                   {availableTables.map((table) => {
                     const isSelected = selectedTableIds.includes(table._id);
-                    const tooSmall = !needsMultiTable && table.capacity < guestCount;
+                    const remainingCap = getRemainingCapacity(table);
+                    const tooSmall = !needsMultiTable && remainingCap < guestCount;
                     return (
                       <label
                         key={table._id}
@@ -268,10 +293,17 @@ const CreateReservation = () => {
                         />
                         <div className="table-card-content">
                           <span className="table-number">Table {table.tableNumber}</span>
-                          <span className="table-capacity">{table.capacity} seats</span>
+                          <span className="table-capacity">
+                            {table.currentOccupancy !== undefined
+                              ? `${remainingCap} of ${table.capacity} seats left`
+                              : `${table.capacity} seats`}
+                          </span>
                           <span className="table-location">
                             {LOCATION_LABELS[table.location] || table.location}
                           </span>
+                          {table.currentOccupancy !== undefined && (
+                            <span className="table-shared-badge">Shared</span>
+                          )}
                         </div>
                       </label>
                     );

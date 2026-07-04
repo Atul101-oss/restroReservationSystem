@@ -44,6 +44,10 @@ const reservationSchema = new mongoose.Schema(
       enum: ['confirmed', 'cancelled'],
       default: 'confirmed',
     },
+    isShared: {
+      type: Boolean,
+      default: false,
+    },
     specialRequests: {
       type: String,
       maxlength: [500, 'Special requests cannot exceed 500 characters'],
@@ -67,8 +71,14 @@ reservationSchema.statics.isTableAvailable = async function (
   tableId,
   date,
   timeSlot,
+  isSharedRequest = false,
+  requestGuests = 0,
   excludeReservationId = null
 ) {
+  const Table = mongoose.model('Table');
+  const table = await Table.findById(tableId);
+  if (!table) return false;
+
   const query = {
     tables: tableId,
     date: date,
@@ -76,21 +86,38 @@ reservationSchema.statics.isTableAvailable = async function (
     status: 'confirmed',
   };
 
-  // When updating an existing reservation, exclude it from the conflict check
+  // When updating/checking, exclude the current reservation if provided
   if (excludeReservationId) {
     query._id = { $ne: excludeReservationId };
   }
 
-  const existingReservation = await this.findOne(query);
-  return !existingReservation;
+  const existingReservations = await this.find(query);
+  if (existingReservations.length === 0) {
+    return true; // No bookings on this table, completely available
+  }
+
+  // If there are bookings, they must all be shared and the request must be shared
+  if (!isSharedRequest) {
+    return false; // Request is not shared, but table is already booked
+  }
+
+  const hasNonShared = existingReservations.some((r) => !r.isShared);
+  if (hasNonShared) {
+    return false; // Table has a non-shared booking
+  }
+
+  const totalGuestsReserved = existingReservations.reduce((sum, r) => sum + r.guests, 0);
+  return (table.capacity - totalGuestsReserved) >= requestGuests;
 };
 
 // Static method to find available tables for a given date and time slot
 // Returns ALL available active tables (no capacity filter — frontend handles multi-table logic)
+// If isShared is true, includes tables that are partially booked but marked as shared
 reservationSchema.statics.findAvailableTables = async function (
   date,
   timeSlot,
-  guests
+  guests,
+  isShared = false
 ) {
   const Table = mongoose.model('Table');
 
@@ -102,18 +129,47 @@ reservationSchema.statics.findAvailableTables = async function (
     date: date,
     timeSlot: timeSlot,
     status: 'confirmed',
-  }).select('tables');
+  }).select('tables isShared guests');
 
-  // Collect all booked table IDs (flatten the tables arrays)
-  const bookedTableIds = new Set();
+  // Build a map of table usage
+  const tableUsage = {};
   bookedReservations.forEach((r) => {
-    r.tables.forEach((tId) => bookedTableIds.add(tId.toString()));
+    r.tables.forEach((tId) => {
+      const idStr = tId.toString();
+      if (!tableUsage[idStr]) {
+        tableUsage[idStr] = {
+          totalGuests: 0,
+          hasNonShared: false,
+        };
+      }
+      tableUsage[idStr].totalGuests += r.guests;
+      if (!r.isShared) {
+        tableUsage[idStr].hasNonShared = true;
+      }
+    });
   });
 
-  // Filter out booked tables
-  const availableTables = allTables.filter(
-    (table) => !bookedTableIds.has(table._id.toString())
-  );
+  // Filter tables
+  const availableTables = [];
+  for (const table of allTables) {
+    const usage = tableUsage[table._id.toString()];
+    if (!usage) {
+      // Completely empty table
+      availableTables.push(table);
+    } else {
+      // Partially or fully booked table
+      if (isShared && !usage.hasNonShared) {
+        const remainingCapacity = table.capacity - usage.totalGuests;
+        if (remainingCapacity >= guests) {
+          // Add metadata to table object (Mongoose document to JSON helper)
+          const tableObj = table.toObject();
+          tableObj.currentOccupancy = usage.totalGuests;
+          tableObj.isSharedOption = true;
+          availableTables.push(tableObj);
+        }
+      }
+    }
+  }
 
   return availableTables;
 };

@@ -51,8 +51,9 @@ router.post(
         });
       }
 
-      const { date, timeSlot, guests, specialRequests, tableId, tableIds } = req.body;
+      const { date, timeSlot, guests, specialRequests, tableId, tableIds, isShared } = req.body;
       const guestCount = parseInt(guests, 10);
+      const isSharedBooking = isShared === true || isShared === 'true';
 
       // Normalize date to start of day for consistent comparison
       const reservationDate = new Date(date);
@@ -103,12 +104,14 @@ router.post(
           const isAvailable = await Reservation.isTableAvailable(
             tId,
             reservationDate,
-            timeSlot
+            timeSlot,
+            isSharedBooking,
+            guestCount
           );
           if (!isAvailable) {
             return res.status(409).json({
               success: false,
-              message: `Table ${table.tableNumber} is already booked for ${timeSlot} on ${reservationDate.toDateString()}`,
+              message: `Table ${table.tableNumber} is not available for ${timeSlot} on ${reservationDate.toDateString()}`,
             });
           }
 
@@ -127,21 +130,29 @@ router.post(
         const availableTables = await Reservation.findAvailableTables(
           reservationDate,
           timeSlot,
-          guestCount
+          guestCount,
+          isSharedBooking
         );
 
+        const getRemainingCapacity = (t) => {
+          if (t.currentOccupancy !== undefined) {
+            return t.capacity - t.currentOccupancy;
+          }
+          return t.capacity;
+        };
+
         // Try to find a single table that fits
-        const singleFit = availableTables.find((t) => t.capacity >= guestCount);
+        const singleFit = availableTables.find((t) => getRemainingCapacity(t) >= guestCount);
         if (singleFit) {
           assignedTables = [singleFit];
         } else {
           // Multi-table auto-assign: greedily pick largest tables until capacity is met
           let remaining = guestCount;
-          const sorted = [...availableTables].sort((a, b) => b.capacity - a.capacity);
+          const sorted = [...availableTables].sort((a, b) => getRemainingCapacity(b) - getRemainingCapacity(a));
           for (const t of sorted) {
             if (remaining <= 0) break;
             assignedTables.push(t);
-            remaining -= t.capacity;
+            remaining -= getRemainingCapacity(t);
           }
 
           if (remaining > 0) {
@@ -156,10 +167,11 @@ router.post(
       // Create the reservation
       const reservation = await Reservation.create({
         user: req.user.id,
-        tables: assignedTables.map((t) => t._id),
+        tables: assignedTables.map((t) => t._id || t.id),
         date: reservationDate,
         timeSlot,
         guests: guestCount,
+        isShared: isSharedBooking,
         specialRequests,
       });
 
