@@ -27,7 +27,7 @@ router.get('/', protect, async (req, res, next) => {
  */
 router.get('/available', protect, async (req, res, next) => {
   try {
-    const { date, timeSlot, guests } = req.query;
+    const { date, timeSlot, guests, isShared } = req.query;
 
     if (!date || !timeSlot || !guests) {
       return res.status(400).json({
@@ -48,16 +48,50 @@ router.get('/available', protect, async (req, res, next) => {
     const reservationDate = new Date(date);
     reservationDate.setHours(0, 0, 0, 0);
 
+    const isSharedBooking = isShared === 'true';
+
+    // Get available tables (including shared ones if isSharedBooking is true)
     const availableTables = await Reservation.findAvailableTables(
       reservationDate,
       timeSlot,
-      guestCount
+      guestCount,
+      isSharedBooking
     );
+
+    const getRemainingCapacity = (t) => {
+      if (t.currentOccupancy !== undefined) {
+        return t.capacity - t.currentOccupancy;
+      }
+      return t.capacity;
+    };
+
+    // Check if any single table fits (using remaining capacity for shared tables)
+    const singleFitTables = availableTables.filter((t) => getRemainingCapacity(t) >= guestCount);
+    const needsMultiTable = singleFitTables.length === 0 && availableTables.length > 0;
+
+    // Build a suggested multi-table combination (greedy: largest remaining first)
+    let suggestedTables = [];
+    if (needsMultiTable) {
+      let remaining = guestCount;
+      const sorted = [...availableTables].sort((a, b) => getRemainingCapacity(b) - getRemainingCapacity(a));
+      for (const t of sorted) {
+        if (remaining <= 0) break;
+        suggestedTables.push(t);
+        remaining -= getRemainingCapacity(t);
+      }
+      // If even all tables aren't enough, clear suggestion
+      if (remaining > 0) {
+        suggestedTables = [];
+      }
+    }
 
     res.status(200).json({
       success: true,
       count: availableTables.length,
       data: availableTables,
+      needsMultiTable,
+      suggestedTableIds: suggestedTables.map((t) => t._id || t.id),
+      suggestedCapacity: suggestedTables.reduce((sum, t) => sum + getRemainingCapacity(t), 0),
     });
   } catch (error) {
     next(error);
@@ -137,7 +171,7 @@ router.delete('/:id', protect, authorize('admin'), async (req, res, next) => {
   try {
     // Check if table has any active reservations
     const activeReservations = await Reservation.countDocuments({
-      table: req.params.id,
+      tables: req.params.id,
       status: 'confirmed',
       date: { $gte: new Date() },
     });

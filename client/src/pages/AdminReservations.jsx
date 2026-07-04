@@ -91,7 +91,14 @@ const AdminReservations = () => {
                 return (
                   <tr key={r._id}>
                     <td><strong>{r.user?.name||'N/A'}</strong><br/><small>{r.user?.email||''}</small></td>
-                    <td>Table {r.table?.tableNumber||'?'}<br/><small>{LOCATION_LABELS[r.table?.location]||''} · {r.table?.capacity} seats</small></td>
+                    <td>
+                      Table{r.tables && r.tables.length > 1 ? 's' : ''} {r.tables && r.tables.length > 0 ? r.tables.map(t => t.tableNumber).join(', ') : '?'}
+                      {r.isShared && <span className="table-shared-badge" style={{ verticalAlign: 'middle', marginLeft: '6px', marginTop: 0 }}>Shared</span>}
+                      <br/>
+                      <small>
+                        {r.tables && r.tables.length > 0 ? [...new Set(r.tables.map(t => LOCATION_LABELS[t.location] || t.location))].join(', ') : ''} · {r.tables && r.tables.length > 0 ? r.tables.reduce((sum, t) => sum + t.capacity, 0) : 0} seats
+                      </small>
+                    </td>
                     <td>{isEditing ? <input type="date" value={editData.date} onChange={e=>setEditData({...editData,date:e.target.value})} /> : formatDate(r.date)}</td>
                     <td>{isEditing ? <select value={editData.timeSlot} onChange={e=>setEditData({...editData,timeSlot:e.target.value})}>{TIME_SLOTS.map(s=><option key={s} value={s}>{s}</option>)}</select> : r.timeSlot}</td>
                     <td>{isEditing ? <input type="number" min={1} max={20} value={editData.guests} onChange={e=>setEditData({...editData,guests:parseInt(e.target.value)})} style={{width:'60px'}} /> : r.guests}</td>

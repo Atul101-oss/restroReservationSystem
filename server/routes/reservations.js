@@ -19,7 +19,7 @@ const VALID_TIME_SLOTS = [
 
 /**
  * @route   POST /api/reservations
- * @desc    Create a new reservation (auto-assigns best-fit table)
+ * @desc    Create a new reservation (supports single or multi-table booking)
  * @access  Private (Customer)
  */
 router.post(
@@ -51,8 +51,9 @@ router.post(
         });
       }
 
-      const { date, timeSlot, guests, specialRequests, tableId } = req.body;
+      const { date, timeSlot, guests, specialRequests, tableId, tableIds, isShared } = req.body;
       const guestCount = parseInt(guests, 10);
+      const isSharedBooking = isShared === true || isShared === 'true';
 
       // Normalize date to start of day for consistent comparison
       const reservationDate = new Date(date);
@@ -68,72 +69,115 @@ router.post(
         });
       }
 
-      let assignedTable;
-
-      if (tableId) {
-        // If a specific table is requested, validate it
-        const table = await Table.findById(tableId);
-        if (!table || !table.isActive) {
+      // Don't allow past time slots on today's date
+      if (reservationDate.getTime() === today.getTime()) {
+        const now = new Date();
+        const slotStart = timeSlot.split('-')[0]; // e.g. "09:00"
+        const [h, m] = slotStart.split(':').map(Number);
+        const slotStartTime = new Date(today);
+        slotStartTime.setHours(h, m, 0, 0);
+        if (now >= slotStartTime) {
           return res.status(400).json({
             success: false,
-            message: 'Selected table is not available',
+            message: `The time slot ${timeSlot} has already started. Please choose a later slot.`,
           });
         }
+      }
 
-        if (table.capacity < guestCount) {
+      let assignedTables = [];
+
+      // Support both tableIds (array for multi-table) and tableId (single, legacy)
+      const requestedTableIds = tableIds || (tableId ? [tableId] : []);
+
+      if (requestedTableIds.length > 0) {
+        // Validate all requested tables
+        let totalCapacity = 0;
+        for (const tId of requestedTableIds) {
+          const table = await Table.findById(tId);
+          if (!table || !table.isActive) {
+            return res.status(400).json({
+              success: false,
+              message: `Table not found or not available (ID: ${tId})`,
+            });
+          }
+
+          const isAvailable = await Reservation.isTableAvailable(
+            tId,
+            reservationDate,
+            timeSlot,
+            isSharedBooking,
+            guestCount
+          );
+          if (!isAvailable) {
+            return res.status(409).json({
+              success: false,
+              message: `Table ${table.tableNumber} is not available for ${timeSlot} on ${reservationDate.toDateString()}`,
+            });
+          }
+
+          totalCapacity += table.capacity;
+          assignedTables.push(table);
+        }
+
+        if (totalCapacity < guestCount) {
           return res.status(400).json({
             success: false,
-            message: `Table ${table.tableNumber} has a capacity of ${table.capacity}, but you have ${guestCount} guests`,
+            message: `Selected table(s) have a combined capacity of ${totalCapacity}, but you have ${guestCount} guests. Please select more tables.`,
           });
         }
-
-        // Check if the table is available for the requested date/time
-        const isAvailable = await Reservation.isTableAvailable(
-          tableId,
-          reservationDate,
-          timeSlot
-        );
-
-        if (!isAvailable) {
-          return res.status(409).json({
-            success: false,
-            message: `Table ${table.tableNumber} is already booked for ${timeSlot} on ${reservationDate.toDateString()}`,
-          });
-        }
-
-        assignedTable = table;
       } else {
-        // Auto-assign the best-fit table (smallest capacity that fits)
+        // Auto-assign: try single best-fit first, then multi-table
         const availableTables = await Reservation.findAvailableTables(
           reservationDate,
           timeSlot,
-          guestCount
+          guestCount,
+          isSharedBooking
         );
 
-        if (availableTables.length === 0) {
-          return res.status(409).json({
-            success: false,
-            message: `No tables available for ${guestCount} guest(s) at ${timeSlot} on ${reservationDate.toDateString()}. Please try a different time or date.`,
-          });
-        }
+        const getRemainingCapacity = (t) => {
+          if (t.currentOccupancy !== undefined) {
+            return t.capacity - t.currentOccupancy;
+          }
+          return t.capacity;
+        };
 
-        // Pick the table with the smallest sufficient capacity (already sorted)
-        assignedTable = availableTables[0];
+        // Try to find a single table that fits
+        const singleFit = availableTables.find((t) => getRemainingCapacity(t) >= guestCount);
+        if (singleFit) {
+          assignedTables = [singleFit];
+        } else {
+          // Multi-table auto-assign: greedily pick largest tables until capacity is met
+          let remaining = guestCount;
+          const sorted = [...availableTables].sort((a, b) => getRemainingCapacity(b) - getRemainingCapacity(a));
+          for (const t of sorted) {
+            if (remaining <= 0) break;
+            assignedTables.push(t);
+            remaining -= getRemainingCapacity(t);
+          }
+
+          if (remaining > 0) {
+            return res.status(409).json({
+              success: false,
+              message: `Not enough tables available for ${guestCount} guest(s) at ${timeSlot} on ${reservationDate.toDateString()}. Please try a different time or date.`,
+            });
+          }
+        }
       }
 
       // Create the reservation
       const reservation = await Reservation.create({
         user: req.user.id,
-        table: assignedTable._id,
+        tables: assignedTables.map((t) => t._id || t.id),
         date: reservationDate,
         timeSlot,
         guests: guestCount,
+        isShared: isSharedBooking,
         specialRequests,
       });
 
       // Populate for response
       const populatedReservation = await Reservation.findById(reservation._id)
-        .populate('table', 'tableNumber capacity location')
+        .populate('tables', 'tableNumber capacity location')
         .populate('user', 'name email');
 
       res.status(201).json({
@@ -154,7 +198,7 @@ router.post(
 router.get('/my', protect, async (req, res, next) => {
   try {
     const reservations = await Reservation.find({ user: req.user.id })
-      .populate('table', 'tableNumber capacity location')
+      .populate('tables', 'tableNumber capacity location')
       .sort({ date: -1, timeSlot: 1 });
 
     res.status(200).json({
@@ -205,7 +249,7 @@ router.put('/:id/cancel', protect, async (req, res, next) => {
     await reservation.save();
 
     const updatedReservation = await Reservation.findById(reservation._id)
-      .populate('table', 'tableNumber capacity location')
+      .populate('tables', 'tableNumber capacity location')
       .populate('user', 'name email');
 
     res.status(200).json({
@@ -242,7 +286,7 @@ router.get('/', protect, authorize('admin'), async (req, res, next) => {
     }
 
     const reservations = await Reservation.find(query)
-      .populate('table', 'tableNumber capacity location')
+      .populate('tables', 'tableNumber capacity location')
       .populate('user', 'name email')
       .sort({ date: -1, timeSlot: 1 });
 
@@ -283,57 +327,56 @@ router.put(
       newDate.setHours(0, 0, 0, 0);
       const newTimeSlot = timeSlot || reservation.timeSlot;
       const newGuests = guests ? parseInt(guests, 10) : reservation.guests;
-      const newTableId = tableId || reservation.table;
+      const newTableId = tableId || (reservation.tables.length > 0 ? reservation.tables[0] : null);
 
-      // Validate the new table capacity
-      const table = await Table.findById(newTableId);
-      if (!table || !table.isActive) {
-        return res.status(400).json({
-          success: false,
-          message: 'Selected table is not available',
-        });
-      }
-
-      if (table.capacity < newGuests) {
-        return res.status(400).json({
-          success: false,
-          message: `Table ${table.tableNumber} has a capacity of ${table.capacity}, but ${newGuests} guests requested`,
-        });
-      }
-
-      // Check availability (excluding the current reservation)
-      if (
-        date ||
-        timeSlot ||
-        tableId
-      ) {
-        const isAvailable = await Reservation.isTableAvailable(
-          newTableId,
-          newDate,
-          newTimeSlot,
-          reservation._id
-        );
-
-        if (!isAvailable) {
-          return res.status(409).json({
+      if (newTableId) {
+        // Validate the table
+        const table = await Table.findById(newTableId);
+        if (!table || !table.isActive) {
+          return res.status(400).json({
             success: false,
-            message: `Table ${table.tableNumber} is already booked for ${newTimeSlot} on ${newDate.toDateString()}`,
+            message: 'Selected table is not available',
           });
         }
+
+        if (table.capacity < newGuests) {
+          return res.status(400).json({
+            success: false,
+            message: `Table ${table.tableNumber} has a capacity of ${table.capacity}, but ${newGuests} guests requested`,
+          });
+        }
+
+        // Check availability (excluding the current reservation)
+        if (date || timeSlot || tableId) {
+          const isAvailable = await Reservation.isTableAvailable(
+            newTableId,
+            newDate,
+            newTimeSlot,
+            reservation._id
+          );
+
+          if (!isAvailable) {
+            return res.status(409).json({
+              success: false,
+              message: `Table ${table.tableNumber} is already booked for ${newTimeSlot} on ${newDate.toDateString()}`,
+            });
+          }
+        }
+
+        reservation.tables = [newTableId];
       }
 
       // Apply updates
       reservation.date = newDate;
       reservation.timeSlot = newTimeSlot;
       reservation.guests = newGuests;
-      reservation.table = newTableId;
       if (status) reservation.status = status;
       if (specialRequests !== undefined) reservation.specialRequests = specialRequests;
 
       await reservation.save();
 
       const updatedReservation = await Reservation.findById(reservation._id)
-        .populate('table', 'tableNumber capacity location')
+        .populate('tables', 'tableNumber capacity location')
         .populate('user', 'name email');
 
       res.status(200).json({

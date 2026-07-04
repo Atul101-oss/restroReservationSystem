@@ -1,221 +1,199 @@
 # ReserveTable — Restaurant Reservation Management System
 
-A full-stack restaurant reservation management system built with **React**, **Node.js/Express**, and **MongoDB**. Supports customer-facing table booking and administrative reservation management with role-based access control.
+ReserveTable is a full-stack, responsive Restaurant Reservation Management System built using the **MERN** stack (MongoDB, Express, React, Node.js). 
+
+This repository implements a role-based reservation workflow, real-time table availability tracking, and advanced business logic including **multi-table auto-recommendations** and **shared-table social dining**.
 
 ---
 
 ## 🚀 Live Demo
 
-> _Deployment URL will be added after deployment._
+> **Live Deployment URL:** _[Insert Deployed App URL Here]_
+> **Frontend Repository:** _[Insert Repository URL Here]_
 
 ### Demo Credentials
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@restaurant.com | admin123 |
-| Customer | john@example.com | customer123 |
+| Role | Email | Password | Access Level |
+|------|-------|----------|--------------|
+| **Admin** | `admin@restaurant.com` | `admin123` | Full administrative controls, CRUD tables, modify bookings |
+| **Customer** | `john@example.com` | `customer123` | Create bookings, view personal list, cancel bookings |
 
 ---
 
 ## 📋 Table of Contents
-- [Setup Instructions](#setup-instructions)
-- [Project Structure](#project-structure)
-- [Assumptions](#assumptions)
-- [Reservation & Availability Logic](#reservation--availability-logic)
-- [Role-Based Access Control](#role-based-access-control)
-- [API Endpoints](#api-endpoints)
-- [Known Limitations](#known-limitations)
-- [Areas for Improvement](#areas-for-improvement)
+- [Setup Instructions](#-setup-instructions)
+- [Assumptions Made](#-assumptions-made)
+- [Reservation Availability & Conflict Handling](#-reservation-availability--conflict-handling)
+- [Role-Based Access Control (RBAC)](#-role-based-access-control-rbac)
+- [Backend API & Data Modeling](#-backend-api--data-modeling)
+- [Frontend Integration & Role-Specific Views](#-frontend-integration--role-specific-views)
+- [Known Limitations & Future Improvements](#-known-limitations--future-improvements)
+- [Technology Stack](#-technology-stack)
 
 ---
 
 ## 🛠 Setup Instructions
 
 ### Prerequisites
-- **Node.js** (v18+)
-- **MongoDB** (running locally or a MongoDB Atlas URI)
-- **npm** (v9+)
+* **Node.js** (v18.0.0 or higher recommended)
+* **npm** (v9.0.0 or higher)
+* **MongoDB** (Local instance or MongoDB Atlas Connection string)
 
-### 1. Clone the repository
-```bash
-git clone <your-repo-url>
-cd agenticReseavation
-```
-
-### 2. Backend Setup
+### 1. Database & Backend Configuration
+Navigate to the `/server` folder:
 ```bash
 cd server
-cp .env.example .env      # Edit .env with your MongoDB URI and JWT secret
-npm install
-npm run seed               # Seeds 10 tables, 1 admin, and 1 customer user
-npm run dev                # Starts backend on port 5000
 ```
-
-### 3. Frontend Setup
+Create a `.env` file in the root of the server directory:
+```env
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/restroReservationSystem
+JWT_SECRET=your_super_secure_jwt_secret_key
+```
+Install dependencies and run the seed script:
 ```bash
-cd client
 npm install
-npm run dev                # Starts frontend on port 5173
+npm run seed
+```
+> 💡 *The seed script clears existing collections and creates the 10 core tables with capacities from 2 to 10 guests, alongside the default Customer and Admin accounts.*
+
+Start the backend server:
+```bash
+npm run dev
 ```
 
-### 4. Access the application
+### 2. Frontend Configuration
+Navigate to the `/client` folder:
+```bash
+cd ../client
+```
+Install dependencies and start the Vite dev server:
+```bash
+npm install
+npm run dev
+```
+
 Open `http://localhost:5173` in your browser.
 
 ---
 
-## 📁 Project Structure
+## 📌 Assumptions Made
 
-```
-├── server/
-│   ├── config/         # Database connection
-│   ├── middleware/      # Auth (JWT), error handling
-│   ├── models/         # Mongoose schemas (User, Table, Reservation)
-│   ├── routes/         # Express API routes
-│   ├── seed/           # Database seeder
-│   ├── server.js       # Express entry point
-│   └── .env.example    # Environment variables template
-│
-├── client/
-│   ├── src/
-│   │   ├── api/        # Axios API layer
-│   │   ├── components/ # Navbar, ProtectedRoute
-│   │   ├── context/    # AuthContext (JWT state management)
-│   │   ├── pages/      # Login, Register, Customer & Admin views
-│   │   ├── utils/      # Helpers, constants
-│   │   ├── App.jsx     # Root component with routing
-│   │   └── index.css   # Complete CSS design system
-│   └── vite.config.js  # Vite config with API proxy
-│
-└── README.md
-```
+1. **Fixed Operating Hours & Time Slots:** The restaurant operates on fixed, 2-hour dining windows (e.g., `09:00-11:00`, `11:00-13:00`, up to `21:00-23:00`). Custom booking durations are out of scope.
+2. **Single-Tenant Structure:** The application manages a single physical restaurant.
+3. **No Overlapping Bookings:** For private tables, a table cannot hold more than one reservation in a single slot. For shared tables, reservations can overlap up to the table's total seat capacity.
+4. **Instant Cancellation Window:** Customers can cancel bookings instantly at any point before the slot's scheduled start time.
 
 ---
 
-## 📌 Assumptions
+## 🔄 Reservation Availability & Conflict Handling
 
-1. **Single Restaurant**: The system manages one restaurant with a fixed set of tables.
-2. **Predefined Time Slots**: Reservations use 2-hour fixed slots (09:00–23:00).
-3. **Table Seeding**: 10 tables are pre-seeded with capacities from 2–10 guests.
-4. **One Reservation Per Table Per Slot**: Each table can only hold one reservation per time slot.
-5. **Customer Registration**: All new registrations default to the `customer` role. Admin accounts are created via the seed script.
-6. **No Payment Integration**: The system focuses on reservation management only.
+The validation engine prevents double-bookings, seats guests optimally, and maximizes seat utilization:
 
----
+### 1. Double-Booking & Conflict Checks
+When a reservation is requested:
+* The system queries the `Reservation` database for all confirmed bookings matching the selected `date` and `timeSlot`.
+* If a table is assigned to a non-shared reservation, it is marked as **unavailable** for that time slot.
+* If a table is assigned to shared reservations, the system sums up the active guest counts on that table. The remaining capacity is computed as:
+  $$\text{Remaining Capacity} = \text{Table Capacity} - \sum \text{Guests on active shared reservations}$$
+  If the remaining capacity is $\ge$ the requested guest count, the table is considered **available** for sharing.
 
-## 🔄 Reservation & Availability Logic
+### 2. Multi-Table Auto-Assignment
+If a customer leaves the table selection empty:
+* **Single Best-Fit:** The system checks if any single available table has a capacity (or remaining capacity) $\ge$ the guest count. It picks the smallest sufficient table to keep larger tables free.
+* **Greedy Solver:** If the party size is larger than the capacity of any single table, the system switches to multi-table mode:
+  1. It fetches all available tables.
+  2. It sorts them descending by remaining capacity.
+  3. It greedily selects tables from the top of the list until the combined capacity fits the party.
+  4. If the combined capacities of all available tables still cannot accommodate the party, it rejects the booking.
 
-This is a **key design area** of the system:
-
-### Creating a Reservation
-1. Customer selects a **date**, **time slot**, and **number of guests**.
-2. The system queries all **active tables** with `capacity ≥ guests`.
-3. It then checks for any **confirmed reservations** on that date + time slot.
-4. Tables already booked are filtered out, leaving only **available tables**.
-5. Available tables are sorted by **capacity ascending** (smallest-first fit).
-6. If the customer selects a specific table, it validates that table's availability.
-7. If no table is selected, the system **auto-assigns the best-fit table** (smallest available table that fits the party).
-
-### Conflict Prevention
-- **Double-booking prevention**: Before creating a reservation, the system checks `Reservation.isTableAvailable()` which queries for any existing confirmed reservation on the same table + date + time slot.
-- **Capacity validation**: The table's `capacity` must be ≥ the requested `guests` count.
-- **Past-date rejection**: Reservations cannot be created for dates in the past.
-- **Status-aware**: Only `confirmed` reservations count as conflicts; `cancelled` reservations free up the slot.
-
-### Admin Updates
-When an admin updates a reservation (date, time, or table), the system re-validates availability **excluding the current reservation** from conflict checks to avoid false conflicts.
+### 3. Time Constraints
+* Past dates are fully blocked.
+* Same-day bookings check the current time. If a slot's start time has passed (e.g. current time is 13:15 for an `11:00-13:00` slot), that option is disabled on the client side and rejected by backend validators.
 
 ---
 
-## 🔐 Role-Based Access Control
+## 🔐 Role-Based Access Control (RBAC)
 
-### Implementation
-- **JWT Authentication**: Users receive a signed JWT token on login/register containing `{ id, role }`.
-- **Auth Middleware** (`protect`): Verifies the JWT token and attaches the user to `req.user`.
-- **Role Guard** (`authorize`): Restricts routes to specific roles (e.g., `authorize('admin')`).
+Security is handled via stateless JSON Web Tokens (JWT):
 
-### Access Matrix
+### 1. Verification Flow
+1. Upon successful login/registration, the backend generates a JWT containing `{ id, role }`.
+2. The client stores this token in `localStorage` and provides it in the `Authorization: Bearer <token>` header for all subsequent API requests.
+3. The `protect` middleware decodes the token and attaches the validated User object to `req.user`.
 
-| Feature | Customer | Admin |
-|---------|----------|-------|
-| Register & Login | ✅ | ✅ |
-| Create reservation | ✅ | ✗ |
-| View own reservations | ✅ | ✗ |
-| Cancel own reservation | ✅ | ✗ |
-| View all reservations | ✗ | ✅ |
-| Filter reservations by date | ✗ | ✅ |
-| Update any reservation | ✗ | ✅ |
-| Cancel any reservation | ✗ | ✅ |
-| Manage tables (CRUD) | ✗ | ✅ |
-
-### Frontend Enforcement
-- **ProtectedRoute** component checks authentication and role before rendering.
-- **Navbar** displays role-specific navigation links.
-- Unauthorized access redirects to the appropriate dashboard.
+### 2. Authorization Rules
+The `authorize(...roles)` middleware restricts route access. For example:
+* **`authorize('customer')`**: Restricts actions like booking and cancellation of own reservations.
+* **`authorize('admin')`**: Safeguards administrative panels, global logs, and table CRUD management.
 
 ---
 
-## 📡 API Endpoints
+## 📐 Backend API & Data Modeling
 
-### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register new customer |
-| POST | `/api/auth/login` | Login & receive JWT |
-| GET | `/api/auth/me` | Get current user |
+### 1. Data Models (Mongoose)
 
-### Tables
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/tables` | Any | List all tables |
-| GET | `/api/tables/available?date=&timeSlot=&guests=` | Any | Get available tables |
-| POST | `/api/tables` | Admin | Create table |
-| PUT | `/api/tables/:id` | Admin | Update table |
-| DELETE | `/api/tables/:id` | Admin | Delete table |
+#### **User Schema**
+* `name` (String, Required)
+* `email` (String, Required, Unique)
+* `password` (String, Required, Encrypted with bcrypt)
+* `role` (String: `customer` | `admin`, Default: `customer`)
 
-### Reservations
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/api/reservations` | Customer | Create reservation |
-| GET | `/api/reservations/my` | Customer | Get own reservations |
-| PUT | `/api/reservations/:id/cancel` | Customer | Cancel own reservation |
-| GET | `/api/reservations?date=&status=` | Admin | Get all reservations |
-| PUT | `/api/reservations/:id` | Admin | Update reservation |
-| DELETE | `/api/reservations/:id` | Admin | Cancel reservation |
+#### **Table Schema**
+* `tableNumber` (Number, Required, Unique)
+* `capacity` (Number, Required, Min: 1)
+* `location` (String: `indoor` | `outdoor` | `window` | `patio` | `private`)
+* `isActive` (Boolean, Default: `true`)
+
+#### **Reservation Schema**
+* `user` (ObjectId ref: 'User', Required)
+* `tables` (Array of ObjectId refs: 'Table', Required) — *Upgraded from a single field to an array to support multi-table booking.*
+* `date` (Date, Required)
+* `timeSlot` (String, Required, Enum)
+* `guests` (Number, Required, Max: 20)
+* `status` (String: `confirmed` | `cancelled`, Default: `confirmed`)
+* `isShared` (Boolean, Default: `false`) — *Supports table sharing.*
+* `specialRequests` (String, Maxlength: 500)
 
 ---
 
-## ⚠️ Known Limitations
+## 💻 Frontend Integration & Role-Specific Views
 
-1. **No real-time updates**: Other users' bookings won't reflect until page refresh.
-2. **Fixed time slots**: Cannot accommodate custom duration reservations.
-3. **Single restaurant**: No multi-tenant/multi-restaurant support.
-4. **No email notifications**: Users don't receive booking confirmations via email.
-5. **Admin creation**: Admin users can only be created via the seed script.
-6. **No pagination**: Large reservation lists are not paginated.
+The React client features distinct, theme-consistent interfaces tailored to each role:
+
+### 1. Customer Interface
+* **Booking Panel:** Features interactive inputs for party sizes and dates. If the guest size requires multiple tables, a warning banner appears offering a "Use Recommended Combination" button.
+* **Table Selector:** Displays available tables with location badges and real-time indicators for shared tables (e.g., "4 of 6 seats left" with a green `SHARED` badge).
+* **My Bookings:** Groups reservations into All, Upcoming, Past, and Cancelled. Includes inline confirmation menus for secure reservation cancellation.
+
+### 2. Admin Dashboard
+* **All Bookings Feed:** A centralized log displaying the customer's credentials, table details (e.g., table numbers, locations, and total capacities), date/time slots, guest counts, and status badges.
+* **Log Filters:** Sorts and filters bookings by date or status.
+* **Inline Booking Editor:** Allows admins to update the date, time slot, guest counts, and status (Confirm/Cancel) of any booking.
+* **Table Management Console:** A CRUD interface enabling admins to dynamically add, edit, or delete restaurant tables.
 
 ---
 
-## 🔮 Areas for Improvement (with additional time)
+## ⚠️ Known Limitations & Future Improvements
 
-1. **Real-time updates** using WebSockets (Socket.io) for live availability.
-2. **Email notifications** for booking confirmation and cancellation.
-3. **Pagination & search** for admin reservation lists.
-4. **Custom time slots** with flexible duration.
-5. **Recurring reservations** for regular customers.
-6. **Table layout visualization** with an interactive floor plan.
-7. **Admin user management** to create/promote admin accounts from the UI.
-8. **Unit & integration tests** using Jest and Supertest.
-9. **Rate limiting** to prevent API abuse.
-10. **Audit logging** to track who modified reservations.
+### Known Limitations
+1. **Stateless Table Layouts:** The available tables list is grid-based rather than displaying an interactive 2D map of the floor.
+2. **Fixed Slots:** Customers cannot book tables outside the preconfigured 2-hour slots.
+3. **No External Notifications:** Confirmations are in-app only, with no SMS/email integration.
+
+### Areas for Improvement (with additional time)
+1. **Interactive Floor Plan:** Implement a SVG-based drag-and-drop table grid for customers to visually pick their seats.
+2. **WebSockets (Socket.io):** Integrate real-time table availability notifications so users don't need to refresh to see recently booked tables.
+3. **SMS & Email Reminders:** Integrate Twilio or SendGrid to send confirmation emails and automated booking reminders.
+4. **Historical Analytics:** Add administrative analytics charts tracking busiest dining slots, popular table locations, and average party sizes.
 
 ---
 
 ## 🧰 Technology Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | React 19, React Router, Axios |
-| Backend | Node.js, Express |
-| Database | MongoDB, Mongoose |
-| Authentication | JWT (jsonwebtoken, bcryptjs) |
-| UI | Custom CSS (dark theme) |
-| Dev Tools | Vite, Nodemon |
+|-------|------------|
+| **Frontend** | React 19, React Router, Axios, React Icons, React Hot Toast |
+| **Backend** | Node.js, Express, Express Validator |
+| **Database** | MongoDB, Mongoose |
+| **Auth** | JSON Web Tokens (JWT), BcryptJS |
+| **UI** | Custom CSS (Dark Theme, Glassmorphism, Micro-Animations) |
