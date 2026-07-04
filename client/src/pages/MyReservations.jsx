@@ -40,11 +40,32 @@ const MyReservations = () => {
     }
   };
 
+  // Helper: check if a reservation's time slot has already passed
+  const isReservationPast = (r) => {
+    const now = new Date();
+    const rDate = new Date(r.date);
+    rDate.setHours(0, 0, 0, 0);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    if (rDate < todayStart) return true; // past day
+
+    if (rDate.getTime() === todayStart.getTime()) {
+      // Same day — check if the time slot has already ended
+      const endTime = r.timeSlot?.split('-')[1]; // e.g. "17:00"
+      if (endTime) {
+        const [h, m] = endTime.split(':').map(Number);
+        const slotEnd = new Date(todayStart);
+        slotEnd.setHours(h, m, 0, 0);
+        return now >= slotEnd;
+      }
+    }
+    return false;
+  };
+
   const filtered = reservations.filter((r) => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const d = new Date(r.date);
-    if (filter === 'upcoming') return r.status === 'confirmed' && d >= today;
-    if (filter === 'past') return d < today;
+    if (filter === 'upcoming') return r.status === 'confirmed' && !isReservationPast(r);
+    if (filter === 'past') return isReservationPast(r);
     if (filter === 'cancelled') return r.status === 'cancelled';
     return true;
   });
@@ -87,7 +108,7 @@ const MyReservations = () => {
         <div className="reservations-list">
           {filtered.map((r) => {
             const style = STATUS_STYLES[r.status];
-            const isPast = new Date(r.date) < new Date();
+            const isPast = isReservationPast(r);
             const isConfirmingCancel = confirmCancelId === r._id;
 
             return (

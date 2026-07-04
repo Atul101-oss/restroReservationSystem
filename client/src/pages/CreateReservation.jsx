@@ -126,11 +126,23 @@ const CreateReservation = () => {
               required
             >
               <option value="">Select a time slot</option>
-              {TIME_SLOTS.map((slot) => (
-                <option key={slot} value={slot}>
-                  {slot}
-                </option>
-              ))}
+              {TIME_SLOTS.map((slot) => {
+                // Disable past time slots for today
+                const isToday = formData.date === getTodayDate();
+                let disabled = false;
+                if (isToday) {
+                  const now = new Date();
+                  const [h, m] = slot.split('-')[0].split(':').map(Number);
+                  const slotStart = new Date();
+                  slotStart.setHours(h, m, 0, 0);
+                  disabled = now >= slotStart;
+                }
+                return (
+                  <option key={slot} value={slot} disabled={disabled}>
+                    {slot}{disabled ? ' (passed)' : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

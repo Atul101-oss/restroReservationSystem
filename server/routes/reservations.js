@@ -68,6 +68,21 @@ router.post(
         });
       }
 
+      // Don't allow past time slots on today's date
+      if (reservationDate.getTime() === today.getTime()) {
+        const now = new Date();
+        const slotStart = timeSlot.split('-')[0]; // e.g. "09:00"
+        const [h, m] = slotStart.split(':').map(Number);
+        const slotStartTime = new Date(today);
+        slotStartTime.setHours(h, m, 0, 0);
+        if (now >= slotStartTime) {
+          return res.status(400).json({
+            success: false,
+            message: `The time slot ${timeSlot} has already started. Please choose a later slot.`,
+          });
+        }
+      }
+
       let assignedTable;
 
       if (tableId) {
