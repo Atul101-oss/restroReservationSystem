@@ -111,6 +111,13 @@ const MyReservations = () => {
             const isPast = isReservationPast(r);
             const isConfirmingCancel = confirmCancelId === r._id;
 
+            const tableNumbers = r.tables && r.tables.length > 0
+              ? r.tables.map((t) => t.tableNumber).join(', ')
+              : 'N/A';
+            const tableLocations = r.tables && r.tables.length > 0
+              ? [...new Set(r.tables.map((t) => LOCATION_LABELS[t.location] || t.location))].join(', ')
+              : '';
+
             return (
               <div
                 key={r._id}
@@ -118,8 +125,8 @@ const MyReservations = () => {
               >
                 <div className="reservation-card-header">
                   <div className="reservation-table-info">
-                    <span className="table-badge">Table {r.table?.tableNumber || 'N/A'}</span>
-                    <span className="location-badge">{LOCATION_LABELS[r.table?.location] || ''}</span>
+                    <span className="table-badge">Table{r.tables && r.tables.length > 1 ? 's' : ''} {tableNumbers}</span>
+                    {tableLocations && <span className="location-badge">{tableLocations}</span>}
                   </div>
                   <span className="status-badge" style={{ backgroundColor: style.bg, color: style.color }}>
                     {style.label}
@@ -145,7 +152,7 @@ const MyReservations = () => {
                     <div className="cancel-confirm-text">
                       <p className="cancel-confirm-title">Cancel this reservation?</p>
                       <p className="cancel-confirm-sub">
-                        Table {r.table?.tableNumber} &bull; {formatDate(r.date)} &bull; {r.timeSlot}
+                        Table{r.tables && r.tables.length > 1 ? 's' : ''} {tableNumbers} &bull; {formatDate(r.date)} &bull; {r.timeSlot}
                       </p>
                       <p className="cancel-confirm-warn">This action cannot be undone.</p>
                     </div>

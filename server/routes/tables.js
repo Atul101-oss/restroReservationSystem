@@ -48,16 +48,40 @@ router.get('/available', protect, async (req, res, next) => {
     const reservationDate = new Date(date);
     reservationDate.setHours(0, 0, 0, 0);
 
+    // Get ALL available tables (no capacity filter)
     const availableTables = await Reservation.findAvailableTables(
       reservationDate,
       timeSlot,
       guestCount
     );
 
+    // Check if any single table fits
+    const singleFitTables = availableTables.filter((t) => t.capacity >= guestCount);
+    const needsMultiTable = singleFitTables.length === 0 && availableTables.length > 0;
+
+    // Build a suggested multi-table combination (greedy: largest first)
+    let suggestedTables = [];
+    if (needsMultiTable) {
+      let remaining = guestCount;
+      const sorted = [...availableTables].sort((a, b) => b.capacity - a.capacity);
+      for (const t of sorted) {
+        if (remaining <= 0) break;
+        suggestedTables.push(t);
+        remaining -= t.capacity;
+      }
+      // If even all tables aren't enough, clear suggestion
+      if (remaining > 0) {
+        suggestedTables = [];
+      }
+    }
+
     res.status(200).json({
       success: true,
       count: availableTables.length,
       data: availableTables,
+      needsMultiTable,
+      suggestedTableIds: suggestedTables.map((t) => t._id),
+      suggestedCapacity: suggestedTables.reduce((sum, t) => sum + t.capacity, 0),
     });
   } catch (error) {
     next(error);
@@ -137,7 +161,7 @@ router.delete('/:id', protect, authorize('admin'), async (req, res, next) => {
   try {
     // Check if table has any active reservations
     const activeReservations = await Reservation.countDocuments({
-      table: req.params.id,
+      tables: req.params.id,
       status: 'confirmed',
       date: { $gte: new Date() },
     });

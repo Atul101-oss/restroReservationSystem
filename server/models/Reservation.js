@@ -7,11 +7,12 @@ const reservationSchema = new mongoose.Schema(
       ref: 'User',
       required: [true, 'Reservation must belong to a user'],
     },
-    table: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Table',
-      required: [true, 'Reservation must be assigned to a table'],
-    },
+    tables: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Table',
+      },
+    ],
     date: {
       type: Date,
       required: [true, 'Please provide a reservation date'],
@@ -53,8 +54,13 @@ const reservationSchema = new mongoose.Schema(
   }
 );
 
-// Compound index to prevent double bookings at the database level
-reservationSchema.index({ table: 1, date: 1, timeSlot: 1 }, { unique: false });
+// Validate that at least one table is assigned
+reservationSchema.pre('validate', function (next) {
+  if (!this.tables || this.tables.length === 0) {
+    this.invalidate('tables', 'Reservation must be assigned to at least one table');
+  }
+  next();
+});
 
 // Static method to check table availability
 reservationSchema.statics.isTableAvailable = async function (
@@ -64,7 +70,7 @@ reservationSchema.statics.isTableAvailable = async function (
   excludeReservationId = null
 ) {
   const query = {
-    table: tableId,
+    tables: tableId,
     date: date,
     timeSlot: timeSlot,
     status: 'confirmed',
@@ -79,7 +85,8 @@ reservationSchema.statics.isTableAvailable = async function (
   return !existingReservation;
 };
 
-// Static method to find available tables for a given date, time slot, and guest count
+// Static method to find available tables for a given date and time slot
+// Returns ALL available active tables (no capacity filter — frontend handles multi-table logic)
 reservationSchema.statics.findAvailableTables = async function (
   date,
   timeSlot,
@@ -87,24 +94,25 @@ reservationSchema.statics.findAvailableTables = async function (
 ) {
   const Table = mongoose.model('Table');
 
-  // Get all active tables with sufficient capacity
-  const suitableTables = await Table.find({
-    capacity: { $gte: guests },
-    isActive: true,
-  }).sort({ capacity: 1 }); // Sort by capacity ascending for optimal assignment
+  // Get all active tables sorted by capacity ascending
+  const allTables = await Table.find({ isActive: true }).sort({ capacity: 1 });
 
   // Get all confirmed reservations for the given date and time slot
   const bookedReservations = await this.find({
     date: date,
     timeSlot: timeSlot,
     status: 'confirmed',
-  }).select('table');
+  }).select('tables');
 
-  const bookedTableIds = bookedReservations.map((r) => r.table.toString());
+  // Collect all booked table IDs (flatten the tables arrays)
+  const bookedTableIds = new Set();
+  bookedReservations.forEach((r) => {
+    r.tables.forEach((tId) => bookedTableIds.add(tId.toString()));
+  });
 
   // Filter out booked tables
-  const availableTables = suitableTables.filter(
-    (table) => !bookedTableIds.includes(table._id.toString())
+  const availableTables = allTables.filter(
+    (table) => !bookedTableIds.has(table._id.toString())
   );
 
   return availableTables;

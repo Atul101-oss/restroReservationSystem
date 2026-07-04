@@ -13,6 +13,8 @@ import {
   HiOutlineClock,
   HiOutlineUserGroup,
   HiOutlineClipboardList,
+  HiOutlineExclamationCircle,
+  HiOutlineInformationCircle,
 } from 'react-icons/hi';
 
 const CreateReservation = () => {
@@ -20,13 +22,17 @@ const CreateReservation = () => {
     date: getTodayDate(),
     timeSlot: '',
     guests: 2,
-    tableId: '',
     specialRequests: '',
   });
   const [availableTables, setAvailableTables] = useState([]);
+  const [needsMultiTable, setNeedsMultiTable] = useState(false);
+  const [suggestedTableIds, setSuggestedTableIds] = useState([]);
+  const [selectedTableIds, setSelectedTableIds] = useState([]);
   const [loadingTables, setLoadingTables] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+
+  const guestCount = parseInt(formData.guests, 10) || 0;
 
   // Fetch available tables whenever date, timeSlot, or guests change
   useEffect(() => {
@@ -34,7 +40,10 @@ const CreateReservation = () => {
       fetchAvailableTables();
     } else {
       setAvailableTables([]);
+      setNeedsMultiTable(false);
+      setSuggestedTableIds([]);
     }
+    setSelectedTableIds([]);
   }, [formData.date, formData.timeSlot, formData.guests]);
 
   const fetchAvailableTables = async () => {
@@ -46,9 +55,13 @@ const CreateReservation = () => {
         formData.guests
       );
       setAvailableTables(res.data.data);
+      setNeedsMultiTable(res.data.needsMultiTable);
+      setSuggestedTableIds(res.data.suggestedTableIds || []);
     } catch (error) {
       toast.error(getErrorMessage(error));
       setAvailableTables([]);
+      setNeedsMultiTable(false);
+      setSuggestedTableIds([]);
     } finally {
       setLoadingTables(false);
     }
@@ -59,10 +72,36 @@ const CreateReservation = () => {
     setFormData((prev) => ({
       ...prev,
       [name]: value,
-      // Reset table selection when key params change
-      ...(name !== 'tableId' && name !== 'specialRequests' ? { tableId: '' } : {}),
     }));
   };
+
+  // Toggle table selection (checkbox mode for multi-table, radio for single)
+  const handleTableToggle = (tableId) => {
+    if (needsMultiTable) {
+      // Checkbox: toggle selection
+      setSelectedTableIds((prev) =>
+        prev.includes(tableId)
+          ? prev.filter((id) => id !== tableId)
+          : [...prev, tableId]
+      );
+    } else {
+      // Radio: single select
+      setSelectedTableIds((prev) =>
+        prev[0] === tableId ? [] : [tableId]
+      );
+    }
+  };
+
+  // Apply the suggested combination
+  const applySuggestion = () => {
+    setSelectedTableIds([...suggestedTableIds]);
+  };
+
+  // Calculate combined capacity of selected tables
+  const selectedCapacity = selectedTableIds.reduce((sum, id) => {
+    const table = availableTables.find((t) => t._id === id);
+    return sum + (table?.capacity || 0);
+  }, 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -72,12 +111,12 @@ const CreateReservation = () => {
       const payload = {
         date: formData.date,
         timeSlot: formData.timeSlot,
-        guests: parseInt(formData.guests, 10),
+        guests: guestCount,
         specialRequests: formData.specialRequests,
       };
-      // Include tableId only if user specifically picked one
-      if (formData.tableId) {
-        payload.tableId = formData.tableId;
+
+      if (selectedTableIds.length > 0) {
+        payload.tableIds = selectedTableIds;
       }
 
       await createReservation(payload);
@@ -89,6 +128,9 @@ const CreateReservation = () => {
       setSubmitting(false);
     }
   };
+
+  // Tables that fit a single party
+  const singleFitTables = availableTables.filter((t) => t.capacity >= guestCount);
 
   return (
     <div className="page-container">
@@ -171,6 +213,34 @@ const CreateReservation = () => {
               {loadingTables && <span className="loading-dot">...</span>}
             </h3>
 
+            {/* Multi-table alert banner */}
+            {!loadingTables && needsMultiTable && availableTables.length > 0 && (
+              <div className="multi-table-alert">
+                <div className="multi-table-alert-icon">
+                  <HiOutlineExclamationCircle />
+                </div>
+                <div className="multi-table-alert-content">
+                  <p className="multi-table-alert-title">
+                    No single table can seat {guestCount} guest{guestCount !== 1 ? 's' : ''}
+                  </p>
+                  <p className="multi-table-alert-sub">
+                    The largest available table seats {Math.max(...availableTables.map((t) => t.capacity))} guests.
+                    Select multiple tables below to accommodate your party.
+                  </p>
+                  {suggestedTableIds.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={applySuggestion}
+                      style={{ marginTop: '10px' }}
+                    >
+                      <HiOutlineInformationCircle /> Use Recommended Combination
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {!loadingTables && availableTables.length === 0 && (
               <div className="no-tables-msg">
                 <p>No tables available for this selection. Try a different date or time.</p>
@@ -178,33 +248,58 @@ const CreateReservation = () => {
             )}
 
             {availableTables.length > 0 && (
-              <div className="table-grid">
-                {availableTables.map((table) => (
-                  <label
-                    key={table._id}
-                    className={`table-card ${formData.tableId === table._id ? 'selected' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="tableId"
-                      value={table._id}
-                      checked={formData.tableId === table._id}
-                      onChange={handleChange}
-                    />
-                    <div className="table-card-content">
-                      <span className="table-number">Table {table.tableNumber}</span>
-                      <span className="table-capacity">{table.capacity} seats</span>
-                      <span className="table-location">
-                        {LOCATION_LABELS[table.location] || table.location}
-                      </span>
-                    </div>
-                  </label>
-                ))}
-              </div>
+              <>
+                <div className="table-grid">
+                  {availableTables.map((table) => {
+                    const isSelected = selectedTableIds.includes(table._id);
+                    const tooSmall = !needsMultiTable && table.capacity < guestCount;
+                    return (
+                      <label
+                        key={table._id}
+                        className={`table-card ${isSelected ? 'selected' : ''} ${tooSmall ? 'too-small' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          value={table._id}
+                          checked={isSelected}
+                          onChange={() => handleTableToggle(table._id)}
+                          disabled={tooSmall}
+                          style={{ display: 'none' }}
+                        />
+                        <div className="table-card-content">
+                          <span className="table-number">Table {table.tableNumber}</span>
+                          <span className="table-capacity">{table.capacity} seats</span>
+                          <span className="table-location">
+                            {LOCATION_LABELS[table.location] || table.location}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {/* Selected capacity indicator for multi-table */}
+                {needsMultiTable && selectedTableIds.length > 0 && (
+                  <div className={`capacity-indicator ${selectedCapacity >= guestCount ? 'sufficient' : 'insufficient'}`}>
+                    <span>
+                      Combined capacity: <strong>{selectedCapacity}</strong> seats
+                      ({selectedTableIds.length} table{selectedTableIds.length !== 1 ? 's' : ''})
+                    </span>
+                    <span className="capacity-vs">
+                      {selectedCapacity >= guestCount
+                        ? `✓ Fits ${guestCount} guest${guestCount !== 1 ? 's' : ''}`
+                        : `✗ Need ${guestCount - selectedCapacity} more seat${guestCount - selectedCapacity !== 1 ? 's' : ''}`}
+                    </span>
+                  </div>
+                )}
+
+                {!needsMultiTable && (
+                  <p className="table-note">
+                    💡 Leave unselected for auto-assignment of the best-fit table.
+                  </p>
+                )}
+              </>
             )}
-            <p className="table-note">
-              💡 Leave unselected for auto-assignment of the best-fit table.
-            </p>
           </div>
         )}
 
@@ -234,9 +329,13 @@ const CreateReservation = () => {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={submitting || !formData.timeSlot}
+            disabled={
+              submitting ||
+              !formData.timeSlot ||
+              (needsMultiTable && selectedCapacity < guestCount)
+            }
           >
-            {submitting ? 'Booking...' : 'Confirm Reservation'}
+            {submitting ? 'Booking...' : needsMultiTable ? `Book ${selectedTableIds.length} Table${selectedTableIds.length !== 1 ? 's' : ''}` : 'Confirm Reservation'}
           </button>
         </div>
       </form>
