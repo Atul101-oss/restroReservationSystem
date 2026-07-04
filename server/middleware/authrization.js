@@ -3,7 +3,8 @@ const User = require('../models/User');
 
 /**
  * Middleware to protect routes — verifies JWT token
- * and attaches the user object to req.user
+ * Verifies JWT token and attaches user data to req.user.
+ * Returns 401 if token is missing or invalid.
  */
 const protect = async (req, res, next) => {
   let token;
