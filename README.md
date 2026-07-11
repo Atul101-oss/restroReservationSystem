@@ -8,7 +8,7 @@ This repository implements a role-based reservation workflow, real-time table av
 
 ## 🚀 Live Demo
 
-> **Live Deployment URL:** http://ec2-13-48-13-23.eu-north-1.compute.amazonaws.com/    
+> **Live Deployment URL:** [http://ec2-13-48-13-23.eu-north-1.compute.amazonaws.com/](http://restro-reservation.s3-website.eu-north-1.amazonaws.com/)    
 > **Frontend Repository:** https://github.com/Atul101-oss/restroReservationSystem
 
 ### Demo Credentials
